@@ -1,35 +1,54 @@
-name: Validate & Patch choice words (YML only)
-  shell: pwsh
-  run: |
-    $valid = @("Apple","Banana","Orange","Grape","Peach")
-    $replacement = "Apple"
-    $file = "main.c"
+name: Fix choice in YAML then Build
 
-    $code = Get-Content -LiteralPath $file -Raw
+on: push
 
-    if ($code -notmatch 'choice\s*\[\s*\]\s*=\s*\{(?<body>[\s\S]*?)\}\s*;') {
-      Write-Host "ERROR: choice[] array not found in $file"
-      exit 1
-    }
+jobs:
+  build:
+    runs-on: windows-latest
 
-    $body = $Matches['body']
-    $choices = [regex]::Matches($body, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+    steps:
+      - uses: actions/checkout@v3
 
-    $invalid = @()
-    foreach ($c in $choices) {
-      if ($valid -notcontains $c) { $invalid += $c }
-    }
+      - name: Validate & Patch choice words (YML only)
+        shell: pwsh
+        run: |
+          $valid = @("Apple","Banana","Orange","Grape","Peach")
+          $replacement = "Apple"
+          $file = "main.c"
 
-    if ($invalid.Count -gt 0) {
-      Write-Host "Invalid choice words found: $($invalid -join ', ')"
-      foreach ($bad in ($invalid | Select-Object -Unique)) {
-        $escaped = [regex]::Escape($bad)
-        $code = [regex]::Replace($code, '"' + $escaped + '"', '"' + $replacement + '"')
-      }
+          $code = Get-Content -LiteralPath $file -Raw
 
-      # ✅ 핵심: 인자 꼬임/와일드카드 해석 방지
-      Set-Content -LiteralPath $file -Value $code -NoNewline -Encoding UTF8
-      Write-Host "Patched $file: replaced invalid words with '$replacement'"
-    } else {
-      Write-Host "All choice words are valid. No patch needed."
-    }
+          if ($code -notmatch 'choice\s*\[\s*\]\s*=\s*\{(?<body>[\s\S]*?)\}\s*;') {
+            Write-Host "ERROR: choice[] array not found in $file"
+            exit 1
+          }
+
+          $body = $Matches['body']
+          $choices = [regex]::Matches($body, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+
+          $invalid = @()
+          foreach ($c in $choices) {
+            if ($valid -notcontains $c) { $invalid += $c }
+          }
+
+          if ($invalid.Count -gt 0) {
+            Write-Host "Invalid choice words found: $($invalid -join ', ')"
+            foreach ($bad in ($invalid | Select-Object -Unique)) {
+              $escaped = [regex]::Escape($bad)
+              $code = [regex]::Replace($code, '"' + $escaped + '"', '"' + $replacement + '"')
+            }
+
+            Set-Content -LiteralPath $file -Value $code -NoNewline -Encoding UTF8
+            Write-Host "Patched $file: replaced invalid words with '$replacement'"
+          } else {
+            Write-Host "All choice words are valid. No patch needed."
+          }
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        run: cl /nologo /W4 /EHsc main.c /Fe:main.exe
+
+      - name: Run
+        run: .\main.exe

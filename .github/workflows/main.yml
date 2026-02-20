@@ -1,0 +1,53 @@
+name: main
+
+on: push
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Fix invalid choice words (YML only)
+        shell: pwsh
+        run: |
+          $valid = @("Apple","Banana","Orange","Grape","Peach")
+          $replacement = "Apple"   # 없는 단어는 이걸로 교체
+
+          $path = "main.c"
+          $code = Get-Content -Raw $path
+
+          if ($code -notmatch 'choice\s*\[\s*\]\s*=\s*\{(?<body>[\s\S]*?)\}\s*;') {
+            Write-Host "ERROR: choice[] array not found in main.c"
+            exit 1
+          }
+
+          $body = $Matches['body']
+          $choices = [regex]::Matches($body, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+
+          $invalid = @()
+          foreach ($c in $choices) {
+            if ($valid -notcontains $c) { $invalid += $c }
+          }
+
+          if ($invalid.Count -gt 0) {
+            Write-Host "Invalid choice words: $($invalid -join ', ')"
+            # 메인 코드에서 "InvalidWord" 를 "Apple"로 치환 (단순 치환)
+            foreach ($bad in ($invalid | Select-Object -Unique)) {
+              $escaped = [regex]::Escape($bad)
+              $code = [regex]::Replace($code, '"' + $escaped + '"', '"' + $replacement + '"')
+            }
+            Set-Content -NoNewline $path $code
+            Write-Host "Patched main.c: replaced invalid words with '$replacement'"
+          } else {
+            Write-Host "No invalid words."
+          }
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        run: cl /nologo /W4 /EHsc main.c /Fe:main.exe
+
+      - name: Run
+        run: .\main.exe

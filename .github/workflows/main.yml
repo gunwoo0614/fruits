@@ -19,7 +19,7 @@ jobs:
           $code = Get-Content -LiteralPath $file -Raw
 
           if ($code -notmatch 'choice\s*\[\s*\]\s*=\s*\{(?<body>[\s\S]*?)\}\s*;') {
-            Write-Host "ERROR: choice[] array not found in $file"
+            Write-Host "ERROR: choice[] array not found in ${file}"
             exit 1
           }
 
@@ -39,7 +39,7 @@ jobs:
             }
 
             Set-Content -LiteralPath $file -Value $code -NoNewline -Encoding UTF8
-            Write-Host "Patched $file: replaced invalid words with '$replacement'"
+            Write-Host "Patched ${file}: replaced invalid words with '$replacement'"
           } else {
             Write-Host "All choice words are valid. No patch needed."
           }

@@ -1,69 +1,153 @@
-name: Fix choice[] only then Build
+name: Fix choice[] only then Build   # GitHub Actions 워크플로 이름 (Actions 탭에 표시됨)
 
-on: push
+on: push                             # GitHub 저장소에 코드가 push될 때마다 자동 실행
 
-jobs:
-  build:
-    runs-on: windows-latest
+jobs:                                # 실행할 작업(Job) 정의
+  build:                             # Job 이름 (임의 지정)
+    runs-on: windows-latest         # Windows 최신 환경에서 실행 (MSVC 컴파일러 사용 목적)
 
-    steps:
-      - uses: actions/checkout@v3
+    steps:                           # Job 안에서 실행할 단계들
+
+      - uses: actions/checkout@v3   # GitHub 저장소의 파일들을 러너(가상 PC)로 다운로드
+                                     # main.c 파일도 여기서 가져옴
 
       - name: Validate & Patch choice[] words (choice-body only)
-        shell: pwsh
+        shell: pwsh                  # PowerShell 환경에서 아래 스크립트 실행
         run: |
+
+          # 허용된 문자열 목록 정의
           $valid = @("Apple","Banana","Orange","Grape","Peach")
+
+          # invalid 문자열을 발견하면 이 문자열로 교체
           $replacement = "Apple"
+
+          # 수정할 대상 파일 이름
           $file = "main.c"
 
+          # main.c 파일 전체 내용을 문자열로 읽음
           $code = Get-Content -LiteralPath $file -Raw -Encoding UTF8
 
-          # Find the choice[] initializer region: choice[] = { ... };
-          $pattern = '(?<pre>\bchoice\s*\[\s*\]\s*=\s*\{)(?<body>[\s\S]*?)(?<post>\}\s*;)'
-          $m = [regex]::Match($code, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
+          # choice[] = { ... }; 형태를 찾기 위한 정규식
+          # pre  = choice[] = {
+          # body = 배열 내부 내용
+          # post = };
+          $pattern = '(?<pre>\bchoice\s*\[\s*\]\s*=\s*\{)(?<body>[\s\S]*?)(?<post>\}\s*;)'
+
+
+          # main.c에서 choice[] 초기화 부분 찾기
+          $m = [regex]::Match(
+                $code,
+                $pattern,
+                [System.Text.RegularExpressions.RegexOptions]::Singleline
+              )
+
+
+          # choice[] 배열을 못 찾으면 에러 출력 후 종료
           if (-not $m.Success) {
             Write-Host "ERROR: choice[] initializer not found in ${file}"
             exit 1
           }
 
+
+          # choice 배열 내부 내용만 추출
           $body = $m.Groups['body'].Value
 
-          # Extract only the string literals inside the choice[] body
-          $choices = [regex]::Matches($body, '"([^"\\]*(\\.[^"\\]*)*)"') | ForEach-Object { $_.Groups[1].Value }
 
+          # 배열 내부에서 문자열들만 추출 ("Apple", "Orange" 등)
+          $choices = [regex]::Matches(
+                        $body,
+                        '"([^"\\]*(\\.[^"\\]*)*)"'
+                     ) |
+                     ForEach-Object {
+                        $_.Groups[1].Value
+                     }
+
+
+          # invalid 문자열 저장할 배열
           $invalid = @()
+
+          # 각 choice 문자열이 valid 목록에 있는지 검사
           foreach ($c in $choices) {
-            if ($valid -notcontains $c) { $invalid += $c }
+
+            # valid 목록에 없으면 invalid에 추가
+            if ($valid -notcontains $c) {
+              $invalid += $c
+            }
           }
 
+
+          # invalid 문자열이 하나라도 있으면 수정 수행
           if ($invalid.Count -gt 0) {
+
+            # 중복 제거
             $invalidUnique = $invalid | Select-Object -Unique
+
+            # invalid 문자열 로그 출력
             Write-Host "Invalid choice words found in choice[]: $($invalidUnique -join ', ')"
 
-            # Patch ONLY inside the body (not the whole file)
+
+            # choice 배열 내부 내용 복사
             $newBody = $body
+
+            # invalid 문자열을 replacement로 교체
             foreach ($bad in $invalidUnique) {
+
+              # 정규식 안전 처리
               $escaped = [regex]::Escape($bad)
-              $newBody = [regex]::Replace($newBody, '"' + $escaped + '"', '"' + $replacement + '"')
+
+              # 배열 내부에서만 교체
+              $newBody = [regex]::Replace(
+                           $newBody,
+                           '"' + $escaped + '"',
+                           '"' + $replacement + '"'
+                         )
             }
 
-            # Rebuild code by replacing only the matched choice[] initializer region
+
+            # main.c 전체를
+            # 앞부분 + 수정된 배열 + 뒷부분
+            # 으로 다시 조합
+
             $before = $code.Substring(0, $m.Index)
             $after  = $code.Substring($m.Index + $m.Length)
-            $newCode = $before + $m.Groups['pre'].Value + $newBody + $m.Groups['post'].Value + $after
 
+            $newCode =
+              $before +
+              $m.Groups['pre'].Value +
+              $newBody +
+              $m.Groups['post'].Value +
+              $after
+
+
+            # main.c 파일을 수정된 내용으로 덮어씀
             Set-Content -LiteralPath $file -Value $newCode -NoNewline -Encoding UTF8
+
+
+            # 수정 완료 로그 출력
             Write-Host "Patched ${file}: replaced invalid words with '$replacement' (choice[] body only)"
-          } else {
+
+          }
+          else {
+
+            # invalid 문자열이 없으면 수정 안함
             Write-Host "All choice[] words are valid. No patch needed."
           }
 
+
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
+        # MSVC 컴파일러 환경 설정
+        # cl.exe 사용 가능하게 만듦
+
 
       - name: Build
         run: cl /nologo /W4 /EHsc main.c /Fe:main.exe
+        # main.c 파일을 컴파일하여 main.exe 실행 파일 생성
+
 
       - name: Run
         run: .\main.exe
+        # 생성된 main.exe 실행
+        # printf 출력이 GitHub Actions 로그에 표시됨

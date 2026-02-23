@@ -19,16 +19,11 @@ jobs:
           $code = Get-Content -LiteralPath $file -Raw -Encoding UTF8
 
           # Find the choice[] initializer region: choice[] = { ... };
-          # - Singleline: dot matches newline
-          # - Captures:
-          #   pre  = 'choice[] = {'
-          #   body = inside of braces
-          #   post = '};'
           $pattern = '(?<pre>\bchoice\s*\[\s*\]\s*=\s*\{)(?<body>[\s\S]*?)(?<post>\}\s*;)'
           $m = [regex]::Match($code, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
 
           if (-not $m.Success) {
-            Write-Host "ERROR: choice[] initializer not found in $file"
+            Write-Host "ERROR: choice[] initializer not found in ${file}"
             exit 1
           }
 
@@ -59,7 +54,7 @@ jobs:
             $newCode = $before + $m.Groups['pre'].Value + $newBody + $m.Groups['post'].Value + $after
 
             Set-Content -LiteralPath $file -Value $newCode -NoNewline -Encoding UTF8
-            Write-Host "Patched $file: replaced invalid words with '$replacement' (choice[] body only)"
+            Write-Host "Patched ${file}: replaced invalid words with '$replacement' (choice[] body only)"
           } else {
             Write-Host "All choice[] words are valid. No patch needed."
           }

@@ -5,8 +5,6 @@ int main(void)
     const char *fruits[] = {
         "Apple", "Banana", "Orange", "Grape", "Peach"
     };
-
-    // 일부러 fruits에 없는 단어를 넣어도 됨 (yml에서 고쳐줄 거라서)
     const char *choice[] = {
         "Apple", "Dog", "Orange", "Car", "Peach"
     };

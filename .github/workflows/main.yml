@@ -1,4 +1,4 @@
-name: Fix choice in YAML then Build
+name: Fix choice[] only then Build
 
 on: push
 
@@ -9,22 +9,33 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Validate & Patch choice words (YML only)
+      - name: Validate & Patch choice[] words (choice-body only)
         shell: pwsh
         run: |
           $valid = @("Apple","Banana","Orange","Grape","Peach")
           $replacement = "Apple"
           $file = "main.c"
 
-          $code = Get-Content -LiteralPath $file -Raw
+          $code = Get-Content -LiteralPath $file -Raw -Encoding UTF8
 
-          if ($code -notmatch 'choice\s*\[\s*\]\s*=\s*\{(?<body>[\s\S]*?)\}\s*;') {
-            Write-Host "ERROR: choice[] array not found in ${file}"
+          # Find the choice[] initializer region: choice[] = { ... };
+          # - Singleline: dot matches newline
+          # - Captures:
+          #   pre  = 'choice[] = {'
+          #   body = inside of braces
+          #   post = '};'
+          $pattern = '(?<pre>\bchoice\s*\[\s*\]\s*=\s*\{)(?<body>[\s\S]*?)(?<post>\}\s*;)'
+          $m = [regex]::Match($code, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+
+          if (-not $m.Success) {
+            Write-Host "ERROR: choice[] initializer not found in $file"
             exit 1
           }
 
-          $body = $Matches['body']
-          $choices = [regex]::Matches($body, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+          $body = $m.Groups['body'].Value
+
+          # Extract only the string literals inside the choice[] body
+          $choices = [regex]::Matches($body, '"([^"\\]*(\\.[^"\\]*)*)"') | ForEach-Object { $_.Groups[1].Value }
 
           $invalid = @()
           foreach ($c in $choices) {
@@ -32,16 +43,25 @@ jobs:
           }
 
           if ($invalid.Count -gt 0) {
-            Write-Host "Invalid choice words found: $($invalid -join ', ')"
-            foreach ($bad in ($invalid | Select-Object -Unique)) {
+            $invalidUnique = $invalid | Select-Object -Unique
+            Write-Host "Invalid choice words found in choice[]: $($invalidUnique -join ', ')"
+
+            # Patch ONLY inside the body (not the whole file)
+            $newBody = $body
+            foreach ($bad in $invalidUnique) {
               $escaped = [regex]::Escape($bad)
-              $code = [regex]::Replace($code, '"' + $escaped + '"', '"' + $replacement + '"')
+              $newBody = [regex]::Replace($newBody, '"' + $escaped + '"', '"' + $replacement + '"')
             }
 
-            Set-Content -LiteralPath $file -Value $code -NoNewline -Encoding UTF8
-            Write-Host "Patched ${file}: replaced invalid words with '$replacement'"
+            # Rebuild code by replacing only the matched choice[] initializer region
+            $before = $code.Substring(0, $m.Index)
+            $after  = $code.Substring($m.Index + $m.Length)
+            $newCode = $before + $m.Groups['pre'].Value + $newBody + $m.Groups['post'].Value + $after
+
+            Set-Content -LiteralPath $file -Value $newCode -NoNewline -Encoding UTF8
+            Write-Host "Patched $file: replaced invalid words with '$replacement' (choice[] body only)"
           } else {
-            Write-Host "All choice words are valid. No patch needed."
+            Write-Host "All choice[] words are valid. No patch needed."
           }
 
       - name: Setup MSVC
